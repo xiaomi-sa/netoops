@@ -1,0 +1,51 @@
+commit b49e7652e81ca344a82b4de5f6da2ef297ffbece
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:56:46 2013 +0800
+
+    netoops_013_netconsole_move_setting_of_default_ports
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index 989936a..cc7da46 100755
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -67,6 +67,7 @@ __setup("netconsole=", option_setup);
+ struct netpoll_targets {
+ 	struct list_head list;
+ 	spinlock_t lock;
++	u16 default_local_port, default_remote_port;
+ #ifdef	CONFIG_NETCONSOLE_DYNAMIC
+ 	struct configfs_subsystem configfs_subsys;
+ #endif
+@@ -160,8 +161,8 @@ static struct netpoll_target *alloc_param_target(struct netpoll_targets *nts,
+ 	nt->nts = nts;
+ 	nt->np.name = nts->subsys_name;
+ 	strlcpy(nt->np.dev_name, "eth0", IFNAMSIZ);
+-	nt->np.local_port = 6665;
+-	nt->np.remote_port = 6666;
++	nt->np.local_port = nts->default_local_port;
++	nt->np.remote_port = nts->default_remote_port;
+ 	memset(nt->np.remote_mac, 0xff, ETH_ALEN);
+ 	INIT_WORK(&nt->cleanup_work, deferred_netpoll_cleanup);
+ 
+@@ -634,8 +635,8 @@ static struct config_item *make_netpoll_target(struct config_group *group,
+ 	nt->nts = nts;
+ 	nt->np.name = nts->subsys_name;
+ 	strlcpy(nt->np.dev_name, "eth0", IFNAMSIZ);
+-	nt->np.local_port = 6665;
+-	nt->np.remote_port = 6666;
++	nt->np.local_port = nts->default_local_port;
++	nt->np.remote_port = nts->default_remote_port;
+ 	memset(nt->np.remote_mac, 0xff, ETH_ALEN);
+ 	INIT_WORK(&nt->cleanup_work, deferred_netpoll_cleanup);
+ 
+@@ -944,6 +945,10 @@ static void __exit unregister_netpoll_targets(struct netpoll_targets *nts)
+ static int __init init_netconsole(void)
+ {
+ 	int err;
++
++	targets.default_local_port = 6665;
++	targets.default_remote_port = 6666;
++
+ 	err = register_netpoll_targets("netconsole", &targets, config);
+ 	if (err)
+ 		return err;

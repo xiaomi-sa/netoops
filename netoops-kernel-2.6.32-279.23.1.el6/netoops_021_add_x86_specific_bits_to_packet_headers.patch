@@ -1,0 +1,65 @@
+commit 5b0c9e6996a85ffc9390119a2981ff8597d184a7
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 17:00:25 2013 +0800
+
+    netoops_021_add_x86_specific_bits_to_packet_headers
+
+diff --git a/drivers/net/netoops.c b/drivers/net/netoops.c
+index 1940ea5..f7665ad 100644
+--- a/drivers/net/netoops.c
++++ b/drivers/net/netoops.c
+@@ -52,8 +52,25 @@ __setup("netoops=", option_setup);
+ #if defined(__i386__) || defined(__x86_64__)
+ #define NETOOPS_ARCH 2
+ struct netoops_arch_data {
+-
++	u8 x86_vendor;
++	u8 x86_family;
++	u8 x86_model;
++	u8 x86_stepping;
++	/* NOTE: regs is 60 or 168 bytes */
++	struct pt_regs regs;
+ } __attribute__((packed));
++
++static void setup_packet_arch_data(struct netoops_arch_data *arch_data,
++				   struct pt_regs *regs) {
++	arch_data->x86_vendor   = current_cpu_data.x86_vendor;
++	arch_data->x86_family   = current_cpu_data.x86;
++	arch_data->x86_model    = current_cpu_data.x86_model;
++	arch_data->x86_stepping = current_cpu_data.x86_mask;
++	if (regs != NULL)
++		memcpy(&arch_data->regs, regs, sizeof(arch_data->regs));
++	else
++		memset(&arch_data->regs, 0, sizeof(arch_data->regs));
++}
+ #else
+ #error "unsupported architecture"
+ #endif
+@@ -86,7 +103,8 @@ struct netoops_msg {
+ 
+ static struct netoops_msg msg;
+ 
+-static void setup_packet_header(int packet_count, int soft_dump)
++static void setup_packet_header(int packet_count, struct pt_regs *regs,
++				int soft_dump)
+ {
+ 	typeof(msg.header) *h = &msg.header;
+ 
+@@ -101,6 +119,8 @@ static void setup_packet_header(int packet_count, int soft_dump)
+ 	strncpy(h->kernel_version, utsname()->release,
+ 		min(sizeof(msg.header.kernel_version),
+ 		    sizeof(utsname()->release)));
++
++	setup_packet_arch_data(&msg.arch_data, regs);
+ }
+ 
+ static int packet_count_from_length(unsigned long l)
+@@ -185,7 +205,7 @@ static void netoops(struct kmsg_dumper *dumper, enum kmsg_dump_reason reason,
+ 
+ 	/* setup the non varying parts of the message */
+ 	memset(&msg, 0, sizeof(msg));
+-	setup_packet_header(packet_count_1 + packet_count_2, soft_dump);
++	setup_packet_header(packet_count_1 + packet_count_2, regs, soft_dump);
+ 
+ 	/* Transmission loop */
+ 	for (i = 0; i < NETOOPS_RETRANSMIT_COUNT; i++) {

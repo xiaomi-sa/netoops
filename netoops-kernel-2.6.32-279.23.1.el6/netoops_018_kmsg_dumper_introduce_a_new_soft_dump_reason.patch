@@ -1,0 +1,18 @@
+commit 79eb3f2260fc871158cede57d2929abb7f69c16a
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:59:51 2013 +0800
+
+    netoops_018_kmsg_dumper_introduce_a_new_soft_dump_reason
+
+diff --git a/include/linux/kmsg_dump.h b/include/linux/kmsg_dump.h
+index db52bbf..2349947 100755
+--- a/include/linux/kmsg_dump.h
++++ b/include/linux/kmsg_dump.h
+@@ -29,6 +29,7 @@ enum kmsg_dump_reason {
+ 	KMSG_DUMP_RESTART,
+ 	KMSG_DUMP_HALT,
+ 	KMSG_DUMP_POWEROFF,
++	KMSG_DUMP_SOFT,
+ };
+ 
+ /**

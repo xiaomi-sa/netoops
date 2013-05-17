@@ -1,0 +1,207 @@
+commit 3f0c1918b236dd2d4bfefedceb6480382a214ef5
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:51:55 2013 +0800
+
+    patches.taobao/netoops_003_netconsole_introduce_locking_over_the_netpoll_fields.patch
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index c1c6051..9f9e50fc 100644
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -326,6 +326,7 @@ static ssize_t store_enabled(struct netconsole_target *nt,
+ 			     const char *buf,
+ 			     size_t count)
+ {
++	unsigned long flags;
+ 	int err;
+ 	long enabled;
+ 
+@@ -334,6 +335,10 @@ static ssize_t store_enabled(struct netconsole_target *nt,
+ 		return enabled;
+ 
+ 	if (enabled) {	/* 1 */
++		spin_lock_irqsave(&target_list_lock, flags);
++		if (nt->enabled)
++			goto busy;
++		spin_unlock_irqrestore(&target_list_lock, flags);
+ 
+ 		/*
+ 		 * Skip netpoll_parse_options() -- all the attributes are
+@@ -342,18 +347,28 @@ static ssize_t store_enabled(struct netconsole_target *nt,
+ 		netpoll_print_options(&nt->np);
+ 
+ 		err = netpoll_setup(&nt->np);
++		spin_lock_irqsave(&target_list_lock, flags);
++		if (err)
++			nt->enabled = 0;
++		else
++			nt->enabled = 1;
++		spin_unlock_irqrestore(&target_list_lock, flags);
+ 		if (err)
+ 			return err;
+ 
+ 		printk(KERN_INFO "netconsole: network logging started\n");
+-
+ 	} else {	/* 0 */
++		spin_lock_irqsave(&target_list_lock, flags);
++		nt->enabled = 0;
++		spin_unlock_irqrestore(&target_list_lock, flags);
++
+ 		netpoll_cleanup(&nt->np);
+ 	}
+ 
+-	nt->enabled = enabled;
+-
+ 	return strnlen(buf, count);
++busy:
++	spin_unlock_irqrestore(&target_list_lock, flags);
++	return -EBUSY;
+ }
+ 
+ static ssize_t store_dev_name(struct netconsole_target *nt,
+@@ -362,13 +377,6 @@ static ssize_t store_dev_name(struct netconsole_target *nt,
+ {
+ 	size_t len;
+ 
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	strlcpy(nt->np.dev_name, buf, IFNAMSIZ);
+ 
+ 	/* Get rid of possible trailing newline from echo(1) */
+@@ -386,13 +394,6 @@ static ssize_t store_local_port(struct netconsole_target *nt,
+ 	long local_port;
+ #define __U16_MAX	((__u16) ~0U)
+ 
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	local_port = strtol10_check_range(buf, 0, __U16_MAX);
+ 	if (local_port < 0)
+ 		return local_port;
+@@ -409,13 +410,6 @@ static ssize_t store_remote_port(struct netconsole_target *nt,
+ 	long remote_port;
+ #define __U16_MAX	((__u16) ~0U)
+ 
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	remote_port = strtol10_check_range(buf, 0, __U16_MAX);
+ 	if (remote_port < 0)
+ 		return remote_port;
+@@ -429,13 +423,6 @@ static ssize_t store_local_ip(struct netconsole_target *nt,
+ 			      const char *buf,
+ 			      size_t count)
+ {
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	nt->np.local_ip = in_aton(buf);
+ 
+ 	return strnlen(buf, count);
+@@ -445,13 +432,6 @@ static ssize_t store_remote_ip(struct netconsole_target *nt,
+ 			       const char *buf,
+ 			       size_t count)
+ {
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	nt->np.remote_ip = in_aton(buf);
+ 
+ 	return strnlen(buf, count);
+@@ -465,13 +445,6 @@ static ssize_t store_remote_mac(struct netconsole_target *nt,
+ 	char *p = (char *) buf;
+ 	int i;
+ 
+-	if (nt->enabled) {
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "
+-				"disable to update parameters\n",
+-				config_item_name(&nt->item));
+-		return -EINVAL;
+-	}
+-
+ 	for (i = 0; i < ETH_ALEN - 1; i++) {
+ 		remote_mac[i] = simple_strtoul(p, &p, 16);
+ 		if (*p != ':')
+@@ -495,15 +468,56 @@ invalid:
+  * Attribute definitions for netconsole_target.
+  */
+ 
+-#define NETCONSOLE_TARGET_ATTR_RO(_name)				\
++#define __NETCONSOLE_TARGET_ATTR_RO(_name, _prefix_...)			\
+ static struct netconsole_target_attr netconsole_target_##_name =	\
+-	__CONFIGFS_ATTR(_name, S_IRUGO, show_##_name, NULL)
++	__CONFIGFS_ATTR(_name, S_IRUGO, show_##_prefix_##_name, NULL)
+ 
+-#define NETCONSOLE_TARGET_ATTR_RW(_name)				\
++#define __NETCONSOLE_TARGET_ATTR_RW(_name, _prefix_...)			\
+ static struct netconsole_target_attr netconsole_target_##_name =	\
+-	__CONFIGFS_ATTR(_name, S_IRUGO | S_IWUSR, show_##_name, store_##_name)
++	__CONFIGFS_ATTR(_name, S_IRUGO | S_IWUSR,			\
++			show_##_prefix_##_name, store_##_prefix_##_name)
++
++#define NETCONSOLE_WRAP_ATTR_STORE(_name)				\
++static ssize_t store_locked_##_name(struct netconsole_target *nt,	\
++				    const char *buf,			\
++				    size_t count)			\
++{									\
++	unsigned long flags;						\
++	ssize_t ret;							\
++	spin_lock_irqsave(&target_list_lock, flags);			\
++	if (nt->enabled) {						\
++		printk(KERN_ERR "netconsole: target (%s) is enabled, "	\
++				"disable to update parameters\n",	\
++				config_item_name(&nt->item));		\
++		spin_unlock_irqrestore(&target_list_lock, flags);	\
++		return -EBUSY;						\
++	}								\
++	ret = store_##_name(nt, buf, count);				\
++	spin_unlock_irqrestore(&target_list_lock, flags);		\
++	return ret;							\
++}
++
++#define NETCONSOLE_WRAP_ATTR_SHOW(_name)				\
++static ssize_t show_locked_##_name(struct netconsole_target *nt, char *buf) \
++{									\
++	unsigned long flags;						\
++	ssize_t ret;							\
++	spin_lock_irqsave(&target_list_lock, flags);			\
++	ret = show_##_name(nt, buf);					\
++	spin_unlock_irqrestore(&target_list_lock, flags);		\
++	return ret;							\
++}
++
++#define NETCONSOLE_TARGET_ATTR_RW(_name)				\
++		NETCONSOLE_WRAP_ATTR_STORE(_name)			\
++		NETCONSOLE_WRAP_ATTR_SHOW(_name)			\
++		__NETCONSOLE_TARGET_ATTR_RW(_name, locked_)
++
++#define NETCONSOLE_TARGET_ATTR_RO(_name)				\
++		NETCONSOLE_WRAP_ATTR_SHOW(_name)			\
++		__NETCONSOLE_TARGET_ATTR_RO(_name, locked_)
+ 
+-NETCONSOLE_TARGET_ATTR_RW(enabled);
++__NETCONSOLE_TARGET_ATTR_RW(enabled);
+ NETCONSOLE_TARGET_ATTR_RW(dev_name);
+ NETCONSOLE_TARGET_ATTR_RW(local_port);
+ NETCONSOLE_TARGET_ATTR_RW(remote_port);

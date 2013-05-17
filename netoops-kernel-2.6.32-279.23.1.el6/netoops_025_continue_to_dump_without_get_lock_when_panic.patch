@@ -1,0 +1,25 @@
+commit a6dea189569e27ff5cfcfe7ff5ad4a48b268326e
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 17:01:46 2013 +0800
+
+    netoops_025_continue_to_dump_without_get_lock_when_panic
+
+diff --git a/kernel/printk.c b/kernel/printk.c
+index 1f0b4da..916197d 100644
+--- a/kernel/printk.c
++++ b/kernel/printk.c
+@@ -1568,11 +1568,10 @@ void kmsg_dump(enum kmsg_dump_reason reason, struct pt_regs *pt_regs)
+ 		l2 = chars;
+ 	}
+ 
+-	if (!spin_trylock_irqsave(&dump_list_lock, flags)) {
+-		printk(KERN_ERR "dump_kmsg: dump list lock is held during %s, skipping dump\n",
++	if (!spin_trylock_irqsave(&dump_list_lock, flags))
++		printk(KERN_ERR "dump_kmsg: dump list lock is held during %s, try to dump directly\n",
+ 				kmsg_to_str(reason));
+-		return;
+-	}
++
+ 	list_for_each_entry(dumper, &dump_list, list)
+ 		dumper->dump(dumper, reason, pt_regs, s1, l1, s2, l2);
+ 	spin_unlock_irqrestore(&dump_list_lock, flags);

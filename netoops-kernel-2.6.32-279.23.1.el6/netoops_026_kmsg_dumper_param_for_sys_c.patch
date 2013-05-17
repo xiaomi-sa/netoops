@@ -1,0 +1,46 @@
+commit 7ec8f27c1c2355f6953483f7a6b8f1cea6d6d987
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 20:27:14 2013 +0800
+
+    fix kernel/sys.c:kmsg_dump args error
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+index c6c9121..b7a81ea 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -282,7 +282,7 @@ out_unlock:
+  */
+ void emergency_restart(void)
+ {
+-	kmsg_dump(KMSG_DUMP_EMERG);
++	kmsg_dump(KMSG_DUMP_EMERG, NULL);
+ 	machine_emergency_restart();
+ }
+ EXPORT_SYMBOL_GPL(emergency_restart);
+@@ -310,7 +310,7 @@ void kernel_restart(char *cmd)
+ 		printk(KERN_EMERG "Restarting system.\n");
+ 	else
+ 		printk(KERN_EMERG "Restarting system with command '%s'.\n", cmd);
+-	kmsg_dump(KMSG_DUMP_RESTART);
++	kmsg_dump(KMSG_DUMP_RESTART, NULL);
+ 	machine_restart(cmd);
+ }
+ EXPORT_SYMBOL_GPL(kernel_restart);
+@@ -332,7 +332,7 @@ void kernel_halt(void)
+ 	kernel_shutdown_prepare(SYSTEM_HALT);
+ 	sysdev_shutdown();
+ 	printk(KERN_EMERG "System halted.\n");
+-	kmsg_dump(KMSG_DUMP_HALT);
++	kmsg_dump(KMSG_DUMP_HALT, NULL);
+ 	machine_halt();
+ }
+ 
+@@ -351,7 +351,7 @@ void kernel_power_off(void)
+ 	disable_nonboot_cpus();
+ 	sysdev_shutdown();
+ 	printk(KERN_EMERG "Power down.\n");
+-	kmsg_dump(KMSG_DUMP_POWEROFF);
++	kmsg_dump(KMSG_DUMP_POWEROFF, NULL);
+ 	machine_power_off();
+ }
+ EXPORT_SYMBOL_GPL(kernel_power_off);

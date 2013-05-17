@@ -1,0 +1,141 @@
+commit 6b1d23a75df649754890e57fbeaac6c13d8b44b9
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:55:22 2013 +0800
+
+    netoops_005_netconsole_call_netpoll_cleanup_in_process_context
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+old mode 100644
+new mode 100755
+index b34f0b1..1e0a581
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -105,6 +105,7 @@ struct netconsole_target {
+ #endif
+ 	int			np_state;
+ 	struct netpoll		np;
++	struct work_struct	cleanup_work;
+ };
+ 
+ #ifdef	CONFIG_NETCONSOLE_DYNAMIC
+@@ -165,6 +166,22 @@ static void netconsole_target_put(struct netconsole_target *nt)
+ 
+ #endif	/* CONFIG_NETCONSOLE_DYNAMIC */
+ 
++static void deferred_netpoll_cleanup(struct work_struct *work)
++{
++	struct netconsole_target *nt;
++	unsigned long flags;
++
++	nt = container_of(work, struct netconsole_target, cleanup_work);
++	netpoll_cleanup(&nt->np);
++
++	spin_lock_irqsave(&target_list_lock, flags);
++	BUG_ON(nt->np_state != NETPOLL_CLEANING);
++	nt->np_state = NETPOLL_DISABLED;
++	spin_unlock_irqrestore(&target_list_lock, flags);
++
++	netconsole_target_put(nt);
++}
++
+ /* Allocate new target (from boot/module param) and setup netpoll for it */
+ static struct netconsole_target *alloc_param_target(char *target_config)
+ {
+@@ -186,6 +203,7 @@ static struct netconsole_target *alloc_param_target(char *target_config)
+ 	nt->np.local_port = 6665;
+ 	nt->np.remote_port = 6666;
+ 	memset(nt->np.remote_mac, 0xff, ETH_ALEN);
++	INIT_WORK(&nt->cleanup_work, deferred_netpoll_cleanup);
+ 
+ 	/* Parse parameters and setup netpoll */
+ 	err = netpoll_parse_options(&nt->np, target_config);
+@@ -208,7 +226,9 @@ fail:
+ /* Cleanup netpoll for given target (from boot/module param) and free it */
+ static void free_param_target(struct netconsole_target *nt)
+ {
+-	netpoll_cleanup(&nt->np);
++	cancel_work_sync(&nt->cleanup_work);
++	if (nt->np_state == NETPOLL_CLEANING || nt->np_state == NETPOLL_ENABLED)
++		netpoll_cleanup(&nt->np);
+ 	kfree(nt);
+ }
+ 
+@@ -349,6 +369,13 @@ static ssize_t store_enabled(struct netconsole_target *nt,
+ 			goto busy;
+ 		else {
+ 			nt->np_state = NETPOLL_SETTINGUP;
++			/*
++			 * Nominally, we would grab an extra reference on the
++			 * config_item here for dynamic targets while we let go
++			 * of the lock, but this isn't required in this case
++			 * because there is a reference implicitly held by the
++			 * caller of the store operation.
++			 */
+ 			spin_unlock_irqrestore(&target_list_lock, flags);
+ 		}
+ 
+@@ -634,6 +661,7 @@ static struct config_item *make_netconsole_target(struct config_group *group,
+ 	nt->np.local_port = 6665;
+ 	nt->np.remote_port = 6666;
+ 	memset(nt->np.remote_mac, 0xff, ETH_ALEN);
++	INIT_WORK(&nt->cleanup_work, deferred_netpoll_cleanup);
+ 
+ 	/* Initialize the config_item member */
+ 	config_item_init_type_name(&nt->item, name, &netconsole_target_type);
+@@ -657,10 +685,16 @@ static void drop_netconsole_target(struct config_group *group,
+ 	spin_unlock_irqrestore(&target_list_lock, flags);
+ 
+ 	/*
+-	 * The target may have never been enabled, or was manually disabled
+-	 * before being removed so netpoll may have already been cleaned up.
++	 * The target may have never been disabled, or was disabled due
++	 * to a netdev event, but we haven't had the chance to clean
++	 * things up yet.
++	 *
++	 * We can't wait for the target to be cleaned up by its
++	 * scheduled work however, as that work doesn't pin this module
++	 * in place.
+ 	 */
+-	if (nt->np_state == NETPOLL_ENABLED)
++	cancel_work_sync(&nt->cleanup_work);
++	if (nt->np_state == NETPOLL_ENABLED || nt->np_state == NETPOLL_CLEANING)
+ 		netpoll_cleanup(&nt->np);
+ 
+ 	config_item_put(&nt->item);
+@@ -688,6 +722,19 @@ static struct configfs_subsystem netconsole_subsys = {
+ 
+ #endif	/* CONFIG_NETCONSOLE_DYNAMIC */
+ 
++/*
++ * Call netpoll_cleanup on this target asynchronously.
++ * target_list_lock is required.
++ */
++static void defer_netpoll_cleanup(struct netconsole_target *nt)
++{
++	if (nt->np_state != NETPOLL_ENABLED)
++		return;
++	netconsole_target_get(nt);
++	nt->np_state = NETPOLL_CLEANING;
++	schedule_work(&nt->cleanup_work);
++}
++
+ /* Handle network interface device notifications */
+ static int netconsole_netdev_event(struct notifier_block *this,
+ 				   unsigned long event,
+@@ -715,13 +762,10 @@ static int netconsole_netdev_event(struct notifier_block *this,
+ 			case NETDEV_JOIN:
+ 			case NETDEV_UNREGISTER:
+ 				/*
+-				 * rtnl_lock already held
++				 * We can't cleanup netpoll in atomic context.
++				 * Kick it off as deferred work.
+ 				 */
+-				if (nt->np.dev) {
+-					__netpoll_cleanup(&nt->np);
+-					dev_put(nt->np.dev);
+-					nt->np.dev = NULL;
+-				}
++				defer_netpoll_cleanup(nt);
+ 				/* Fall through */
+ 				nt->enabled = 0;
+ 				stopped = true;

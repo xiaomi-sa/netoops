@@ -1,0 +1,94 @@
+commit d9138f9a9f7e210fa015ec64cb3fff5cd1c6fc03
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:56:56 2013 +0800
+
+    netoops_014_netpoll_introduce_netpoll_target_configs
+
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+index b2dac17..279df73 100644
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -3301,14 +3301,15 @@ config NET_FC
+ config NETCONSOLE
+ 	tristate "Network console logging support (EXPERIMENTAL)"
+ 	depends on EXPERIMENTAL
++	select NETPOLL_TARGETS
+ 	---help---
+ 	If you want to log kernel messages over the network, enable this.
+ 	See <file:Documentation/networking/netconsole.txt> for details.
+ 
+ config NETCONSOLE_DYNAMIC
+ 	bool "Dynamic reconfiguration of logging targets (EXPERIMENTAL)"
+-	depends on NETCONSOLE && SYSFS && EXPERIMENTAL
+-	select CONFIGFS_FS
++	depends on NETCONSOLE && EXPERIMENTAL
++	select NETPOLL_TARGETS_DYNAMIC
+ 	help
+ 	  This option enables the ability to dynamically reconfigure target
+ 	  parameters (interface, IP addresses, port numbers, MAC addresses)
+@@ -3316,7 +3317,15 @@ config NETCONSOLE_DYNAMIC
+ 	  See <file:Documentation/networking/netconsole.txt> for details.
+ 
+ config NETPOLL
+-	def_bool NETCONSOLE
++	def_bool false
++
++config NETPOLL_TARGETS
++	tristate
++	select NETPOLL
++	select CONFIGFS_FS if NETPOLL_TARGETS_DYNAMIC
++
++config NETPOLL_TARGETS_DYNAMIC
++	bool
+ 
+ config NETPOLL_TRAP
+ 	bool "Netpoll traffic trapping"
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index cc7da46..2e96bc1 100755
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -68,7 +68,7 @@ struct netpoll_targets {
+ 	struct list_head list;
+ 	spinlock_t lock;
+ 	u16 default_local_port, default_remote_port;
+-#ifdef	CONFIG_NETCONSOLE_DYNAMIC
++#ifdef	CONFIG_NETPOLL_TARGETS_DYNAMIC
+ 	struct configfs_subsystem configfs_subsys;
+ #endif
+ 	struct notifier_block netdev_notifier;
+@@ -110,7 +110,7 @@ static DEFINE_NETPOLL_TARGETS(targets);
+ struct netpoll_target {
+ 	struct netpoll_targets *nts;
+ 	struct list_head	list;
+-#ifdef	CONFIG_NETCONSOLE_DYNAMIC
++#ifdef	CONFIG_NETPOLL_TARGETS_DYNAMIC
+ 	struct config_item	item;
+ #endif
+ 	int			np_state;
+@@ -193,7 +193,7 @@ static void free_param_target(struct netpoll_target *nt)
+ 	kfree(nt);
+ }
+ 
+-#ifdef	CONFIG_NETCONSOLE_DYNAMIC
++#ifdef	CONFIG_NETPOLL_TARGETS_DYNAMIC
+ 
+ /*
+  * Our subsystem hierarchy is:
+@@ -723,7 +723,7 @@ static void netpoll_target_put(struct netpoll_target *nt)
+ 		config_item_put(&nt->item);
+ }
+ 
+-#else	/* !CONFIG_NETCONSOLE_DYNAMIC */
++#else	/* !CONFIG_NETPOLL_TARGETS_DYNAMIC */
+ 
+ static int __init dynamic_netpoll_targets_init(const char *subsys_name,
+ 					       struct netpoll_targets *nts)
+@@ -747,7 +747,7 @@ static void netpoll_target_put(struct netpoll_target *nt)
+ {
+ }
+ 
+-#endif	/* CONFIG_NETCONSOLE_DYNAMIC */
++#endif	/* CONFIG_NETPOLL_TARGETS_DYNAMIC */
+ 
+ /*
+  * Call netpoll_cleanup on this target asynchronously.

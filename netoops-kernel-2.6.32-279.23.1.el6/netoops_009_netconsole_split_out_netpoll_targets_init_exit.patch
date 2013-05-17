@@ -1,0 +1,148 @@
+commit e70ef6f2599c8828c8818f341ae4a6d5101213f7
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:55:59 2013 +0800
+
+    netoops_009_netconsole_split_out_netpoll_targets_init_exit
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index 38a8313..37e3f5a 100755
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -662,13 +662,14 @@ static struct config_item_type netconsole_subsys_type = {
+ 	.ct_owner	= THIS_MODULE,
+ };
+ 
+-static int __init dynamic_netpoll_targets_init(struct netpoll_targets *nts)
++static int __init dynamic_netpoll_targets_init(const char *subsys_name,
++					       struct netpoll_targets *nts)
+ {
+ 	struct configfs_subsystem *subsys = &nts->configfs_subsys;
+ 
+ 	config_group_init(&subsys->su_group);
+ 	mutex_init(&subsys->su_mutex);
+-	strncpy((char *)&subsys->su_group.cg_item.ci_namebuf, "netconsole",
++	strncpy((char *)&subsys->su_group.cg_item.ci_namebuf, subsys_name,
+ 		CONFIGFS_ITEM_NAME_LEN);
+ 	subsys->su_group.cg_item.ci_type = &netconsole_subsys_type;
+ 	return configfs_register_subsystem(subsys);
+@@ -835,13 +836,15 @@ static struct console netconsole = {
+ 	.write	= write_msg,
+ };
+ 
+-static int __init init_netconsole(void)
++static int __init register_netpoll_targets(const char *subsys_name,
++					   struct netpoll_targets *nts,
++					   char *static_targets)
+ {
+ 	int err;
+ 	struct netconsole_target *nt, *tmp;
+-	unsigned long flags;
+ 	char *target_config;
+-	char *input = config;
++	char *input = static_targets;
++	unsigned long flags;
+ 
+ 	if (strnlen(input, MAX_PARAM_LENGTH)) {
+ 		while ((target_config = strsep(&input, ";"))) {
+@@ -850,41 +853,33 @@ static int __init init_netconsole(void)
+ 				err = PTR_ERR(nt);
+ 				goto fail;
+ 			}
+-			/* Dump existing printks when we register */
+-			netconsole.flags |= CON_PRINTBUFFER;
+ 
+-			spin_lock_irqsave(&targets.lock, flags);
+-			list_add(&nt->list, &targets.list);
+-			spin_unlock_irqrestore(&targets.lock, flags);
++			spin_lock_irqsave(&nts->lock, flags);
++			list_add(&nt->list, &nts->list);
++			spin_unlock_irqrestore(&nts->lock, flags);
+ 		}
+ 	}
+ 
+-	targets.netdev_notifier.notifier_call = netconsole_netdev_event;
+-	err = register_netdevice_notifier(&targets.netdev_notifier);
++	nts->netdev_notifier.notifier_call = netconsole_netdev_event;
++	err = register_netdevice_notifier(&nts->netdev_notifier);
+ 	if (err)
+ 		goto fail;
+ 
+-	err = dynamic_netpoll_targets_init(&targets);
++	err = dynamic_netpoll_targets_init(subsys_name, nts);
+ 	if (err)
+ 		goto undonotifier;
+ 
+-	register_console(&netconsole);
+-	printk(KERN_INFO "netconsole: network logging started\n");
+-
+-	return err;
++	return 0;
+ 
+ undonotifier:
+-	unregister_netdevice_notifier(&targets.netdev_notifier);
+-
++	unregister_netdevice_notifier(&nts->netdev_notifier);
+ fail:
+-	printk(KERN_ERR "netconsole: cleaning up\n");
+-
+ 	/*
+ 	 * Remove all targets and destroy them (only targets created
+ 	 * from the boot/module option exist here). Skipping the list
+ 	 * lock is safe here, and netpoll_cleanup() will sleep.
+ 	 */
+-	list_for_each_entry_safe(nt, tmp, &targets.list, list) {
++	list_for_each_entry_safe(nt, tmp, &nts->list, list) {
+ 		list_del(&nt->list);
+ 		free_param_target(nt);
+ 	}
+@@ -892,13 +887,12 @@ fail:
+ 	return err;
+ }
+ 
+-static void __exit cleanup_netconsole(void)
++static void __exit unregister_netpoll_targets(struct netpoll_targets *nts)
+ {
+ 	struct netconsole_target *nt, *tmp;
+ 
+-	unregister_console(&netconsole);
+-	dynamic_netpoll_targets_exit(&targets);
+-	unregister_netdevice_notifier(&targets.netdev_notifier);
++	dynamic_netpoll_targets_exit(nts);
++	unregister_netdevice_notifier(&nts->netdev_notifier);
+ 
+ 	/*
+ 	 * Targets created via configfs pin references on our module
+@@ -908,11 +902,32 @@ static void __exit cleanup_netconsole(void)
+ 	 * destroy them. Skipping the list lock is safe here, and
+ 	 * netpoll_cleanup() will sleep.
+ 	 */
+-	list_for_each_entry_safe(nt, tmp, &targets.list, list) {
++	list_for_each_entry_safe(nt, tmp, &nts->list, list) {
+ 		list_del(&nt->list);
+ 		free_param_target(nt);
+ 	}
+ }
+ 
++static int __init init_netconsole(void)
++{
++	int err;
++	err = register_netpoll_targets("netconsole", &targets, config);
++	if (err)
++		return err;
++	/* Dump existing printks if we registered any targets */
++	if (!list_empty(&targets.list))
++		netconsole.flags |= CON_PRINTBUFFER;
++	register_console(&netconsole);
++	printk(KERN_INFO "netconsole: network logging started\n");
++
++	return 0;
++}
++
++static void __exit cleanup_netconsole(void)
++{
++	unregister_console(&netconsole);
++	unregister_netpoll_targets(&targets);
++}
++
+ module_init(init_netconsole);
+ module_exit(cleanup_netconsole);

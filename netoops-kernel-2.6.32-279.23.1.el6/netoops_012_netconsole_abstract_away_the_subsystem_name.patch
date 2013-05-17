@@ -1,0 +1,182 @@
+commit d307f6a3371c70569c0bff52c3f828ecad7d05eb
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:56:37 2013 +0800
+
+    netoops_012_netconsole_abstract_away_the_subsystem_name
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index 5a10b33..989936a 100755
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -71,6 +71,7 @@ struct netpoll_targets {
+ 	struct configfs_subsystem configfs_subsys;
+ #endif
+ 	struct notifier_block netdev_notifier;
++	char *subsys_name;
+ };
+ #define DEFINE_NETPOLL_TARGETS(x) struct netpoll_targets x = \
+ 	{ .list = LIST_HEAD_INIT(x.list), \
+@@ -151,12 +152,13 @@ static struct netpoll_target *alloc_param_target(struct netpoll_targets *nts,
+ 	 */
+ 	nt = kzalloc(sizeof(*nt), GFP_KERNEL);
+ 	if (!nt) {
+-		printk(KERN_ERR "netconsole: failed to allocate memory\n");
++		printk(KERN_ERR "%s: failed to allocate memory\n",
++		       nts->subsys_name);
+ 		goto fail;
+ 	}
+ 
+ 	nt->nts = nts;
+-	nt->np.name = "netconsole";
++	nt->np.name = nts->subsys_name;
+ 	strlcpy(nt->np.dev_name, "eth0", IFNAMSIZ);
+ 	nt->np.local_port = 6665;
+ 	nt->np.remote_port = 6666;
+@@ -195,7 +197,7 @@ static void free_param_target(struct netpoll_target *nt)
+ /*
+  * Our subsystem hierarchy is:
+  *
+- * /sys/kernel/config/netconsole/
++ * /sys/kernel/config/<subsys_name>/
+  *				|
+  *				<target>/
+  *				|	enabled
+@@ -231,7 +233,8 @@ static struct netpoll_target *to_target(struct config_item *item)
+  * We return (signed) long only because we may want to return errors.
+  * Do not use this to convert numbers that are allowed to be negative.
+  */
+-static long strtol10_check_range(const char *cp, long min, long max)
++static long strtol10_check_range(struct netpoll_targets *nts,
++				 const char *cp, long min, long max)
+ {
+ 	long ret;
+ 	char *p = (char *) cp;
+@@ -242,12 +245,12 @@ static long strtol10_check_range(const char *cp, long min, long max)
+ 	ret = simple_strtol(p, &p, 10);
+ 
+ 	if (*p && (*p != '\n')) {
+-		printk(KERN_ERR "netconsole: invalid input\n");
++		printk(KERN_ERR "%s: invalid input\n", nts->subsys_name);
+ 		return -EINVAL;
+ 	}
+ 	if ((ret < min) || (ret > max)) {
+-		printk(KERN_ERR "netconsole: input %ld must be between "
+-				"%ld and %ld\n", ret, min, max);
++		printk(KERN_ERR "%s: input %ld must be between %ld and %ld\n",
++		       nts->subsys_name, ret, min, max);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -318,7 +321,7 @@ static ssize_t store_enabled(struct netpoll_target *nt,
+ 	int err;
+ 	long enabled;
+ 
+-	enabled = strtol10_check_range(buf, 0, 1);
++	enabled = strtol10_check_range(nts, buf, 0, 1);
+ 	if (enabled < 0)
+ 		return enabled;
+ 
+@@ -354,7 +357,8 @@ static ssize_t store_enabled(struct netpoll_target *nt,
+ 		if (err)
+ 			return err;
+ 
+-		printk(KERN_INFO "netconsole: network logging started\n");
++		printk(KERN_INFO "%s: network logging started\n",
++		       nts->subsys_name);
+ 	} else {	/* 0 */
+ 		spin_lock_irqsave(&nts->lock, flags);
+ 		if (nt->np_state == NETPOLL_ENABLED)
+@@ -399,7 +403,7 @@ static ssize_t store_local_port(struct netpoll_target *nt,
+ 	long local_port;
+ #define __U16_MAX	((__u16) ~0U)
+ 
+-	local_port = strtol10_check_range(buf, 0, __U16_MAX);
++	local_port = strtol10_check_range(nt->nts, buf, 0, __U16_MAX);
+ 	if (local_port < 0)
+ 		return local_port;
+ 
+@@ -415,7 +419,7 @@ static ssize_t store_remote_port(struct netpoll_target *nt,
+ 	long remote_port;
+ #define __U16_MAX	((__u16) ~0U)
+ 
+-	remote_port = strtol10_check_range(buf, 0, __U16_MAX);
++	remote_port = strtol10_check_range(nt->nts, buf, 0, __U16_MAX);
+ 	if (remote_port < 0)
+ 		return remote_port;
+ 
+@@ -465,7 +469,7 @@ static ssize_t store_remote_mac(struct netpoll_target *nt,
+ 	return strnlen(buf, count);
+ 
+ invalid:
+-	printk(KERN_ERR "netconsole: invalid input\n");
++	printk(KERN_ERR "%s: invalid input\n", nt->nts->subsys_name);
+ 	return -EINVAL;
+ }
+ 
+@@ -492,8 +496,9 @@ static ssize_t store_locked_##_name(struct netpoll_target *nt,		\
+ 	ssize_t ret;							\
+ 	spin_lock_irqsave(&nts->lock, flags);				\
+ 	if (nt->np_state != NETPOLL_DISABLED) {				\
+-		printk(KERN_ERR "netconsole: target (%s) is enabled, "	\
++		printk(KERN_ERR "%s: target (%s) is enabled, "		\
+ 				"disable to update parameters\n",	\
++				nts->subsys_name,			\
+ 				config_item_name(&nt->item));		\
+ 		spin_unlock_irqrestore(&nts->lock, flags);		\
+ 		return -EBUSY;						\
+@@ -621,12 +626,13 @@ static struct config_item *make_netpoll_target(struct config_group *group,
+ 	 */
+ 	nt = kzalloc(sizeof(*nt), GFP_KERNEL);
+ 	if (!nt) {
+-		printk(KERN_ERR "netconsole: failed to allocate memory\n");
++		printk(KERN_ERR "%s: failed to allocate memory\n",
++		       nts->subsys_name);
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 
+ 	nt->nts = nts;
+-	nt->np.name = "netconsole";
++	nt->np.name = nts->subsys_name;
+ 	strlcpy(nt->np.dev_name, "eth0", IFNAMSIZ);
+ 	nt->np.local_port = 6665;
+ 	nt->np.remote_port = 6666;
+@@ -797,8 +803,8 @@ static int netpoll_targets_netdev_event(struct notifier_block *this,
+ 	}
+ 	spin_unlock_irqrestore(&nts->lock, flags);
+ 	if (stopped) {
+-		printk(KERN_INFO "netconsole: network logging stopped on "
+-		       "interface %s as it ", dev->name);
++		printk(KERN_INFO "%s: network logging stopped on "
++		       "interface %s %s", nts->subsys_name, dev->name);
+ 		switch (event) {
+ 		case NETDEV_UNREGISTER:
+ 			printk(KERN_CONT "unregistered\n");
+@@ -884,12 +890,19 @@ static int __init register_netpoll_targets(const char *subsys_name,
+ 	if (err)
+ 		goto fail;
+ 
++	nts->subsys_name = kstrdup(subsys_name, GFP_KERNEL);
++	err = -ENOMEM;
++	if (!nts->subsys_name)
++		goto undonotifier;
++
+ 	err = dynamic_netpoll_targets_init(subsys_name, nts);
+ 	if (err)
+-		goto undonotifier;
++		goto free_subsys_name;
+ 
+ 	return 0;
+ 
++free_subsys_name:
++	kfree(nts->subsys_name);
+ undonotifier:
+ 	unregister_netdevice_notifier(&nts->netdev_notifier);
+ fail:
+@@ -925,6 +938,7 @@ static void __exit unregister_netpoll_targets(struct netpoll_targets *nts)
+ 		list_del(&nt->list);
+ 		free_param_target(nt);
+ 	}
++	kfree(nts->subsys_name);
+ }
+ 
+ static int __init init_netconsole(void)

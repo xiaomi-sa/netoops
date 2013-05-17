@@ -1,0 +1,60 @@
+commit c88a91b0955317318d6381c13cfdec99767f12c6
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:59:59 2013 +0800
+
+    netoops_019_sysrq_add_option_to_soft_dump
+
+diff --git a/Documentation/sysrq.txt b/Documentation/sysrq.txt
+index d56a017..b5dd2bb 100644
+--- a/Documentation/sysrq.txt
++++ b/Documentation/sysrq.txt
+@@ -116,6 +116,10 @@ On all -  write a character to /proc/sysrq-trigger.  e.g.:
+ 
+ 'x'	- Used by xmon interface on ppc/powerpc platforms.
+ 
++'y'	- Trigger a 'soft' kmsg dump. Any kmsg_dump clients (mtdoops,
++          netoops, ramoops) will initiate a dump to their respective
++          backend.
++
+ 'z'	- Dump the ftrace buffer
+ 
+ '0'-'9' - Sets the console log level, controlling which kernel messages
+diff --git a/drivers/char/sysrq.c b/drivers/char/sysrq.c
+index b720410..fbe7a0b 100644
+--- a/drivers/char/sysrq.c
++++ b/drivers/char/sysrq.c
+@@ -38,6 +38,7 @@
+ #include <linux/workqueue.h>
+ #include <linux/hrtimer.h>
+ #include <linux/oom.h>
++#include <linux/kmsg_dump.h>
+ 
+ #include <asm/ptrace.h>
+ #include <asm/irq_regs.h>
+@@ -391,6 +392,17 @@ static struct sysrq_key_op sysrq_unrt_op = {
+ 	.enable_mask	= SYSRQ_ENABLE_RTNICE,
+ };
+ 
++static void sysrq_handle_softdump(int key, struct tty_struct *tty)
++{
++	kmsg_dump(KMSG_DUMP_SOFT, NULL);
++}
++static struct sysrq_key_op sysrq_softdump_op = {
++	.handler	= sysrq_handle_softdump,
++	.help_msg	= "soft-dump(Y)",
++	.action_msg	= "Trigger a soft dump",
++	.enable_mask	= SYSRQ_ENABLE_DUMP,
++};
++
+ /* Key Operations table and lock */
+ static DEFINE_SPINLOCK(sysrq_key_table_lock);
+ 
+@@ -447,7 +459,7 @@ static struct sysrq_key_op *sysrq_key_table[36] = {
+ 	/* x: May be registered on ppc/powerpc for xmon */
+ 	NULL,				/* x */
+ 	/* y: May be registered on sparc64 for global register dump */
+-	NULL,				/* y */
++	&sysrq_softdump_op,		/* y */
+ 	&sysrq_ftrace_dump_op,		/* z */
+ };
+ 

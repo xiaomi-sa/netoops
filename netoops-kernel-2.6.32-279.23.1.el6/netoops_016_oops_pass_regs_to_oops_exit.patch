@@ -1,0 +1,110 @@
+commit 6acad8b3b813dc28acad8cf3b673cb334c95a4da
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:57:46 2013 +0800
+
+    netoops_016_oops_pass_regs_to_oops_exit
+
+diff --git a/arch/arm/kernel/traps.c b/arch/arm/kernel/traps.c
+index 3f361a7..9f641fa 100644
+--- a/arch/arm/kernel/traps.c
++++ b/arch/arm/kernel/traps.c
+@@ -263,7 +263,7 @@ NORET_TYPE void die(const char *str, struct pt_regs *regs, int err)
+ 	bust_spinlocks(0);
+ 	add_taint(TAINT_DIE);
+ 	spin_unlock_irq(&die_lock);
+-	oops_exit();
++	oops_exit(regs);
+ 
+ 	if (in_interrupt())
+ 		panic("Fatal exception in interrupt");
+diff --git a/arch/parisc/kernel/traps.c b/arch/parisc/kernel/traps.c
+index 8b58bf0..4aa5514 100644
+--- a/arch/parisc/kernel/traps.c
++++ b/arch/parisc/kernel/traps.c
+@@ -294,7 +294,7 @@ void die_if_kernel(char *str, struct pt_regs *regs, long err)
+ 		panic("Fatal exception");
+ 	}
+ 
+-	oops_exit();
++	oops_exit(regs);
+ 	do_exit(SIGSEGV);
+ }
+ 
+diff --git a/arch/powerpc/kernel/traps.c b/arch/powerpc/kernel/traps.c
+index 83b57ac..152a0e8 100644
+--- a/arch/powerpc/kernel/traps.c
++++ b/arch/powerpc/kernel/traps.c
+@@ -168,7 +168,7 @@ int die(const char *str, struct pt_regs *regs, long err)
+ 	if (panic_on_oops)
+ 		panic("Fatal exception");
+ 
+-	oops_exit();
++	oops_exit(regs);
+ 	do_exit(err);
+ 
+ 	return 0;
+diff --git a/arch/s390/kernel/traps.c b/arch/s390/kernel/traps.c
+index 7dd1ca6..8cffa9f 100644
+--- a/arch/s390/kernel/traps.c
++++ b/arch/s390/kernel/traps.c
+@@ -274,7 +274,7 @@ void die(const char * str, struct pt_regs * regs, long err)
+ 		panic("Fatal exception in interrupt");
+ 	if (panic_on_oops)
+ 		panic("Fatal exception: panic_on_oops");
+-	oops_exit();
++	oops_exit(regs);
+ 	do_exit(SIGSEGV);
+ }
+ 
+diff --git a/arch/sh/kernel/traps_32.c b/arch/sh/kernel/traps_32.c
+index 7a2ee3a..ff04013 100644
+--- a/arch/sh/kernel/traps_32.c
++++ b/arch/sh/kernel/traps_32.c
+@@ -181,7 +181,7 @@ void die(const char * str, struct pt_regs * regs, long err)
+ 	bust_spinlocks(0);
+ 	add_taint(TAINT_DIE);
+ 	spin_unlock_irq(&die_lock);
+-	oops_exit();
++	oops_exit(regs);
+ 
+ 	if (kexec_should_crash(current))
+ 		crash_kexec(regs);
+diff --git a/arch/x86/kernel/dumpstack.c b/arch/x86/kernel/dumpstack.c
+index f0d341d..626ae4b 100644
+--- a/arch/x86/kernel/dumpstack.c
++++ b/arch/x86/kernel/dumpstack.c
+@@ -249,7 +249,7 @@ void __kprobes oops_end(unsigned long flags, struct pt_regs *regs, int signr)
+ 		/* Nest count reaches zero, release the lock. */
+ 		__raw_spin_unlock(&die_lock);
+ 	raw_local_irq_restore(flags);
+-	oops_exit();
++	oops_exit(regs);
+ 
+ 	if (!signr)
+ 		return;
+diff --git a/include/linux/kernel.h b/include/linux/kernel.h
+index b5d64ac..51a3d4e 100644
+--- a/include/linux/kernel.h
++++ b/include/linux/kernel.h
+@@ -204,7 +204,7 @@ extern long (*panic_blink)(long time);
+ NORET_TYPE void panic(const char * fmt, ...)
+ 	__attribute__ ((NORET_AND format (printf, 1, 2))) __cold;
+ extern void oops_enter(void);
+-extern void oops_exit(void);
++extern void oops_exit(struct pt_regs *);
+ extern int oops_may_print(void);
+ NORET_TYPE void do_exit(long error_code)
+ 	ATTRIB_NORET;
+diff --git a/kernel/panic.c b/kernel/panic.c
+index 9346c76..f714647 100644
+--- a/kernel/panic.c
++++ b/kernel/panic.c
+@@ -382,7 +382,7 @@ static void print_oops_end_marker(void)
+  * Called when the architecture exits its oops handler, after printing
+  * everything.
+  */
+-void oops_exit(void)
++void oops_exit(struct pt_regs *regs)
+ {
+ 	do_oops_enter_exit();
+ 	print_oops_end_marker();

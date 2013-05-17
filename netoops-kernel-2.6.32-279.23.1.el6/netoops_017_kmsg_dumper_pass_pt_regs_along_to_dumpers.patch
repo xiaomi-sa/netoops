@@ -1,0 +1,120 @@
+commit 46b3cd7d553841a454d9093f8c6bf59ddf79ffb4
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:58:50 2013 +0800
+
+    netoops_017_kmsg_dumper_pass_pt_regs_along_to_dumpers
+
+diff --git a/fs/pstore/platform.c b/fs/pstore/platform.c
+index 90f2afa..2caacd9 100644
+--- a/fs/pstore/platform.c
++++ b/fs/pstore/platform.c
+@@ -95,7 +95,7 @@ static const char *get_reason_str(enum kmsg_dump_reason reason)
+  * as we can from the end of the buffer.
+  */
+ static void pstore_dump(struct kmsg_dumper *dumper,
+-	    enum kmsg_dump_reason reason,
++	    enum kmsg_dump_reason reason, struct pt_regs *pt_regs,
+ 	    const char *s1, unsigned long l1,
+ 	    const char *s2, unsigned long l2)
+ {
+diff --git a/include/linux/kmsg_dump.h b/include/linux/kmsg_dump.h
+old mode 100644
+new mode 100755
+index 2d1dd45..db52bbf
+--- a/include/linux/kmsg_dump.h
++++ b/include/linux/kmsg_dump.h
+@@ -14,6 +14,8 @@
+ 
+ #include <linux/list.h>
+ 
++struct pt_regs;
++
+ /*
+  * Keep this list arranged in rough order of priority. Anything listed after
+  * KMSG_DUMP_OOPS will not be logged by default unless printk.always_kmsg_dump
+@@ -39,6 +41,7 @@ enum kmsg_dump_reason {
+  */
+ struct kmsg_dumper {
+ 	void (*dump)(struct kmsg_dumper *dumper, enum kmsg_dump_reason reason,
++			struct pt_regs *pt_regs,
+ 			const char *s1, unsigned long l1,
+ 			const char *s2, unsigned long l2);
+ 	struct list_head list;
+@@ -46,13 +49,13 @@ struct kmsg_dumper {
+ };
+ 
+ #ifdef CONFIG_PRINTK
+-void kmsg_dump(enum kmsg_dump_reason reason);
++void kmsg_dump(enum kmsg_dump_reason reason, struct pt_regs *pt_regs);
+ 
+ int kmsg_dump_register(struct kmsg_dumper *dumper);
+ 
+ int kmsg_dump_unregister(struct kmsg_dumper *dumper);
+ #else
+-static inline void kmsg_dump(enum kmsg_dump_reason reason)
++static inline void kmsg_dump(enum kmsg_dump_reason reason, struct pt_regs *pt_regs)
+ {
+ }
+ 
+diff --git a/kernel/kexec.c b/kernel/kexec.c
+index 63dc7e9..fca2118 100644
+--- a/kernel/kexec.c
++++ b/kernel/kexec.c
+@@ -1096,10 +1096,11 @@ void crash_kexec(struct pt_regs *regs)
+ 		if (kexec_crash_image) {
+ 			struct pt_regs fixed_regs;
+ 
+-			kmsg_dump(KMSG_DUMP_KEXEC);
+-
+ 			crash_setup_regs(&fixed_regs, regs);
+ 			crash_save_vmcoreinfo();
++
++			kmsg_dump(KMSG_DUMP_KEXEC, &fixed_regs);
++
+ 			machine_crash_shutdown(&fixed_regs);
+ 			machine_kexec(kexec_crash_image);
+ 		}
+diff --git a/kernel/panic.c b/kernel/panic.c
+index f714647..8f47945 100644
+--- a/kernel/panic.c
++++ b/kernel/panic.c
+@@ -100,7 +100,7 @@ NORET_TYPE void panic(const char * fmt, ...)
+ 	 */
+ 	crash_kexec(NULL);
+ 
+-	kmsg_dump(KMSG_DUMP_PANIC);
++	kmsg_dump(KMSG_DUMP_PANIC, NULL);
+ 
+ 	/*
+ 	 * Note smp_send_stop is the usual smp shutdown function, which
+@@ -386,7 +386,7 @@ void oops_exit(struct pt_regs *regs)
+ {
+ 	do_oops_enter_exit();
+ 	print_oops_end_marker();
+-	kmsg_dump(KMSG_DUMP_OOPS);
++	kmsg_dump(KMSG_DUMP_OOPS, regs);
+ }
+ 
+ #ifdef WANT_WARN_ON_SLOWPATH
+diff --git a/kernel/printk.c b/kernel/printk.c
+index bcccdec..1f0b4da 100644
+--- a/kernel/printk.c
++++ b/kernel/printk.c
+@@ -1534,7 +1534,7 @@ static const char *kmsg_to_str(enum kmsg_dump_reason reason)
+  * Iterate through each of the dump devices and call the oops/panic
+  * callbacks with the log buffer.
+  */
+-void kmsg_dump(enum kmsg_dump_reason reason)
++void kmsg_dump(enum kmsg_dump_reason reason, struct pt_regs *pt_regs)
+ {
+ 	unsigned long end;
+ 	unsigned chars;
+@@ -1574,7 +1574,7 @@ void kmsg_dump(enum kmsg_dump_reason reason)
+ 		return;
+ 	}
+ 	list_for_each_entry(dumper, &dump_list, list)
+-		dumper->dump(dumper, reason, s1, l1, s2, l2);
++		dumper->dump(dumper, reason, pt_regs, s1, l1, s2, l2);
+ 	spin_unlock_irqrestore(&dump_list_lock, flags);
+ }
+ #endif

@@ -1,0 +1,54 @@
+commit 8b02fa310359d935d8f535d9d42b5efd3cf77165
+Author: yubo <yubo@xiaomi.com>
+Date:   Sat Apr 27 16:51:41 2013 +0800
+
+    netoops_002_netconsole_remove_unneeded_reference_counter
+
+diff --git a/drivers/net/netconsole.c b/drivers/net/netconsole.c
+index 76a7c4d..c1c6051 100644
+--- a/drivers/net/netconsole.c
++++ b/drivers/net/netconsole.c
+@@ -671,7 +671,6 @@ static int netconsole_netdev_event(struct notifier_block *this,
+ 
+ 	spin_lock_irqsave(&target_list_lock, flags);
+ 	list_for_each_entry(nt, &target_list, list) {
+-		netconsole_target_get(nt);
+ 		if (nt->np.dev == dev) {
+ 			switch (event) {
+ 			case NETDEV_CHANGENAME:
+@@ -694,7 +693,6 @@ static int netconsole_netdev_event(struct notifier_block *this,
+ 				break;
+ 			}
+ 		}
+-		netconsole_target_put(nt);
+ 	}
+ 	spin_unlock_irqrestore(&target_list_lock, flags);
+ 	if (stopped) {
+@@ -734,7 +732,6 @@ static void write_msg(struct console *con, const char *msg, unsigned int len)
+ 
+ 	spin_lock_irqsave(&target_list_lock, flags);
+ 	list_for_each_entry(nt, &target_list, list) {
+-		netconsole_target_get(nt);
+ 		if (nt->enabled && netif_running(nt->np.dev)) {
+ 			/*
+ 			 * We nest this inside the for-each-target loop above
+@@ -750,7 +747,6 @@ static void write_msg(struct console *con, const char *msg, unsigned int len)
+ 				left -= frag;
+ 			}
+ 		}
+-		netconsole_target_put(nt);
+ 	}
+ 	spin_unlock_irqrestore(&target_list_lock, flags);
+ }
+diff --git a/include/linux/notifier.h b/include/linux/notifier.h
+index e42d3eb..b5b8a3e 100644
+--- a/include/linux/notifier.h
++++ b/include/linux/notifier.h
+@@ -205,6 +205,7 @@ static inline int notifier_to_errno(int ret)
+ #define NETDEV_BONDING_OLDTYPE  0x000E
+ #define NETDEV_BONDING_NEWTYPE  0x000F
+ #define NETDEV_RELEASE		0x0010
++#define NETDEV_BONDING_DESLAVE	0x0011
+ #define NETDEV_NOTIFY_PEERS	0x0013
+ #define NETDEV_JOIN		0x0014
+ #define NETDEV_POST_INIT	0x0015
