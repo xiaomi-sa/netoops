@@ -47,7 +47,7 @@ echo "1" > /sys/kernel/netoops/netoops_record_oom
 ```
 yum install syslog-ng syslog-ng-libdbi
 
-echo >> /etc/syslog-ng/syslog-ng.conf <'EOF'
+echo >> /etc/syslog-ng/syslog-ng.conf << 'EOF'
 source netoops { udp(port(520)); };
 destination oopslog { file("/var/log/oops"); };
 log { source(netoops); destination(oopslog); };
